@@ -1,0 +1,3 @@
+com/NoviBackend/WalletWatch/unittests/wallet/WalletServiceTest.class
+com/NoviBackend/WalletWatch/unittests/security/AuthenticationServiceTest.class
+com/NoviBackend/WalletWatch/integrationtests/IntegrationTests.class
