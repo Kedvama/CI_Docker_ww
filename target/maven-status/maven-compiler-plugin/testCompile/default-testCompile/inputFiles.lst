@@ -1,0 +1,3 @@
+/home/ubuntu/Development/CI_Docker_ww/src/test/java/com/NoviBackend/WalletWatch/integrationtests/IntegrationTests.java
+/home/ubuntu/Development/CI_Docker_ww/src/test/java/com/NoviBackend/WalletWatch/unittests/security/AuthenticationServiceTest.java
+/home/ubuntu/Development/CI_Docker_ww/src/test/java/com/NoviBackend/WalletWatch/unittests/wallet/WalletServiceTest.java
