@@ -13,8 +13,8 @@ services:
       - db_data:/var/lib/postgresql/data
 
   app:
-    image: walletwatch
-    container_name: walletwatch
+    image: ${APP_NAME}
+    container_name: ${APP_NAME}
     depends_on:
       - db
     ports:
