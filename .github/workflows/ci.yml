@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       APP_NAME: ${{ vars.APP_NAME }} 
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }} 
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ POSTGRES_PASSWORD }} 
       
     steps:
     - uses: actions/checkout@v4
