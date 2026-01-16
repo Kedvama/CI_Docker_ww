@@ -11,6 +11,7 @@ env:
   POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
   POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
   POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   test:
@@ -56,22 +57,22 @@ jobs:
     name: Build image
     needs: test
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-  
+
+      - name: Normalize image name (lowercase)
+        run: echo "IMAGE=$(echo $IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Build image
         run: |
-          docker build -t ghcr.io/${{ github.repository }}:${{ github.sha }} .
-          docker tag ghcr.io/${{ github.repository }}:${{ github.sha }} ghcr.io/${{ github.repository }}:latest
-  
+          docker build -t $IMAGE:${{ github.sha }} .
+          docker tag $IMAGE:${{ github.sha }} $IMAGE:latest
+
       - name: Save image
         run: |
-          docker save \
-            ghcr.io/${{ github.repository }}:${{ github.sha }} \
-            ghcr.io/${{ github.repository }}:latest \
-            > image.tar
-  
+          docker save $IMAGE:${{ github.sha }} $IMAGE:latest > image.tar
+
       - uses: actions/upload-artifact@v4
         with:
           name: docker-image
@@ -85,7 +86,10 @@ jobs:
     permissions: 
       packages: write
       
-    steps:
+    steps:   
+      - name: Normalize image name (lowercase)
+        run: echo "IMAGE=$(echo $IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - uses: actions/download-artifact@v4
         with:
           name: docker-image
@@ -98,11 +102,5 @@ jobs:
 
       - name: Push image
         run: |
-          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}:latest
-
-      
-      
-
-      
-        
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
