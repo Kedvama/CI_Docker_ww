@@ -73,7 +73,6 @@ public class SpringSecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/prof/demote").hasRole("PROF")
                 .requestMatchers(HttpMethod.PUT, "/stocks/{id}").hasAnyRole("ADMIN", "PROF", "USER")
                 .requestMatchers(HttpMethod.PUT, "/subscriptions").hasAnyRole("ADMIN", "USER")
-                .requestMatchers(HttpMethod.GET, "/").permitAll()
 
                 .anyRequest().denyAll()
                 .and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);
