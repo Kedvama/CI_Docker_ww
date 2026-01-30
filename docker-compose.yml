@@ -13,7 +13,7 @@ services:
       - db_data:/var/lib/postgresql/data
 
   app:
-    image: ${APP_NAME}
+    image: ${APP_IMAGE}
     container_name: ${APP_NAME}
     depends_on:
       - db
