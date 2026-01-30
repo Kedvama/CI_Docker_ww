@@ -14,6 +14,25 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  lint:
+    name: Code Quality (Lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17 (with Maven cache)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Run lint
+        run: make lint
+        
   test:
     services:
         postgres:
@@ -31,7 +50,7 @@ jobs:
             --health-timeout 5s
             --health-retries 5
             
-    name: Lint & test (Java)
+    name: Test (Java)
     runs-on: ubuntu-latest
     
     steps:
@@ -47,17 +66,16 @@ jobs:
       - name: Install dependencies
         run: make install
 
-      - name: Run lint
-        run: make lint
-
       - name: Run tests
         run: make test
         
   build:
     name: Build image
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
-
+    
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
     steps:
       - uses: actions/checkout@v4
 
