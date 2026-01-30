@@ -122,3 +122,40 @@ jobs:
         run: |
           docker push $IMAGE:${{ github.sha }}
           docker push $IMAGE:latest
+
+  deploy_bundle:
+    name: Build deploy.zip
+    needs: [build, push]
+    runs-on: ubuntu-latest
+
+    # Alleen maken als het géén PR is
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deploy directory exists
+        run: |
+          test -d deploy
+          ls -la deploy
+
+      - name: Prepare deploy bundle
+        run: |
+          rm -f deploy.zip
+          cd deploy
+          zip -r ../deploy.zip .
+
+      - name: Upload deploy bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-bundle
+          path: deploy.zip
+
+      - name: Create GitHub Release and upload deploy.zip
+        uses: softprops/action-gh-release@v2
+        with:
+          files: deploy.zip
+      
+    
