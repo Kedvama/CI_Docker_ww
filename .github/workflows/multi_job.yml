@@ -1,8 +1,9 @@
-name: Multi-job CI
+name: Multi-job CI + GHCR + Deploy Bundle
 
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
 
@@ -32,27 +33,26 @@ jobs:
 
       - name: Run lint
         run: make lint
-        
+
   test:
-    services:
-        postgres:
-          image: postgres:16
-          ports:
-            - 5432:5432
-          env:
-            APP_NAME: ${{ vars.APP_NAME }}
-            POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-            POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-            POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          options: >-
-            --health-cmd pg_isready
-            --health-interval 10s
-            --health-timeout 5s
-            --health-retries 5
-            
     name: Test (Java)
     runs-on: ubuntu-latest
-    
+
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        options: >-
+          --health-cmd "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -68,67 +68,87 @@ jobs:
 
       - name: Run tests
         run: make test
-        
-  build:
-    name: Build image
-    needs: [test, lint]
+
+  build_and_push:
+    name: Build + Push image to GHCR
+    needs: [lint, test]
     runs-on: ubuntu-latest
-    
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
+
+    # Niet pushen op PR’s
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      app_tag: ${{ steps.meta.outputs.app_tag }}
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Normalize image name (lowercase)
-        run: echo "IMAGE=$(echo $IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        shell: bash
+        run: echo "IMAGE=$(echo '${{ env.IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-      - name: Build image
+      - name: Compute tags
+        id: meta
+        shell: bash
         run: |
-          docker build -t $IMAGE:${{ github.sha }} .
-          docker tag $IMAGE:${{ github.sha }} $IMAGE:latest
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
 
-      - name: Save image
-        run: |
-          docker save $IMAGE:${{ github.sha }} $IMAGE:latest > image.tar
+          # De "app tag" die we in deploy/.env.example willen schrijven:
+          # - tag push -> vX.Y.Z
+          # - main push -> latest
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            APP_TAG="${GITHUB_REF_NAME}"
+          else
+            APP_TAG="latest"
+          fi
+          echo "app_tag=${APP_TAG}" >> $GITHUB_OUTPUT
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: image.tar
-
-  push:
-    name: Push image to GHCR
-    needs: build 
-    runs-on: ubuntu-latest
-    
-    permissions: 
-      packages: write
-      
-    steps:   
-      - name: Normalize image name (lowercase)
-        run: echo "IMAGE=$(echo $IMAGE | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-          
-      - name: Load image
-        run: docker load < image.tar
+          # Extra tag op commit SHA (altijd)
+          echo "sha_tag=sha-${GITHUB_SHA}" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
-        run: echo ${{ github.token }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Push image
+      - name: Build image (sha tag)
+        shell: bash
         run: |
-          docker push $IMAGE:${{ github.sha }}
-          docker push $IMAGE:latest
+          docker build -t ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }} .
+
+      - name: Push sha tag
+        shell: bash
+        run: |
+          docker push ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }}
+
+      - name: Tag + push latest (only on main)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          docker tag \
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }} \
+            ${{ steps.meta.outputs.image }}:latest
+          docker push ${{ steps.meta.outputs.image }}:latest
+
+      - name: Tag + push release tag (only on version tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          docker tag \
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha_tag }} \
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.app_tag }}
+          docker push ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.app_tag }}
 
   deploy_bundle:
-    name: Build deploy.zip
-    needs: [build, push]
+    name: Build deploy.zip (+ Release on tags)
+    needs: [build_and_push]
     runs-on: ubuntu-latest
 
-    # Alleen maken als het géén PR is
+    # Niet op PR’s
     if: github.event_name != 'pull_request'
 
     permissions:
@@ -136,32 +156,35 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Verify deploy directory exists
+        shell: bash
         run: |
           test -d deploy
           ls -la deploy
 
       - name: Prepare deploy bundle
+        shell: bash
         run: |
           rm -f deploy.zip
           cd deploy
+
+          # Schrijf APP_IMAGE automatisch in .env.example als die regel bestaat
+          # (zodat de bundle meteen naar de juiste image/tag wijst)
+          if [[ -f .env.example ]] && grep -q '^APP_IMAGE=' .env.example; then
+            sed -i "s|^APP_IMAGE=.*|APP_IMAGE=${{ needs.build_and_push.outputs.image }}:${{ needs.build_and_push.outputs.app_tag }}|g" .env.example
+          fi
+
           zip -r ../deploy.zip .
 
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            APP_TAG="${GITHUB_REF_NAME}"
-          else
-            APP_TAG="latest"
-          fi
-          
       - name: Upload deploy bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: deploy-bundle
           path: deploy.zip
 
-      - name: Create GitHub Release and upload deploy.zip
+      - name: Create GitHub Release and upload deploy.zip (only on tags)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: deploy.zip
-      
-    
